@@ -8,93 +8,149 @@ Defines a neural network.
 import numpy as np
 import random
 
-class Activations:
+from matplotlib import pyplot as plt
 
-    @staticmethod
-    def sigmoid(z):
-        return 1.0/(1.0 + np.exp(-z))
+def sigmoid(z):
+    return 1.0/(1.0 + np.exp(-z))
 
+def sigmoid_prime(z):
+    return np.multiply(sigmoid(z), 1 - sigmoid(z))
 
 class Network:
 
+    class Layer:
+        def __init__(self, n, prev):
+            self.n = n
+            self.prev = prev
+            self.next = None
+
+            self.b = None 
+            self.w = None
+            self.z = None
+            self.a = None
+
+            if not self.is_input():
+                self.prev.next = self
+                # Each layer owns the weights coming into it!
+                self.w = np.random.randn(self.n, self.prev.n)
+                self.b = np.random.randn(self.n, 1)
+        
+            self.delta_err = None
+            
+        def is_input(self):
+            return (self.prev == None)
+
+        def is_output(self):
+            return (self.next == None)
+
+        def feedforward(self, x):
+            if self.is_input():
+                self.a = x
+                return self.next.feedforward(x)
+            
+            self.z = np.dot(self.w, x) + self.b
+            self.a = sigmoid(self.z)
+
+            if self.is_output():
+                return self.a
+            else:
+                return self.next.feedforward(self.a)
+        
+        def backprop(self, cost_derivative, y, del_C_b, del_C_w):
+            if self.is_input():
+                return None
+            
+            del_C_b.insert(0, np.zeros(self.b.shape))
+            del_C_w.insert(0, np.zeros(self.w.shape))
+
+            sig_prime = sigmoid_prime(self.z)
+
+            if self.is_output():
+                self.delta_err = np.multiply(cost_derivative(self.a, y),
+                                             sig_prime)
+            else:
+                nabla_C = np.dot(self.next.w.transpose(), self.next.delta_err)
+                self.delta_err = nabla_C * sig_prime
+            
+            del_C_b[0] = self.delta_err
+            del_C_w[0] = np.dot(self.delta_err, self.prev.a.transpose())
+
+            self.prev.backprop(cost_derivative, y, del_C_b, del_C_w)
+
+
     def __init__(self, sizes):
-        """
-        Sizes is a list containing the number
-        of neurons in each layer, e.g. [3, 2, 4].
-
-        Biases and weights are initialised randomly for now.
-        """
-
+        self.layers = []
         self.num_layers = len(sizes)
-        self.sizes = sizes
-        # np.random.randn(y, 1) generates a y by 1 vector of
-        # random numbers, using a normal distribution with mean 0
-        # and s.d. 1
-        # We start from the second layer since the input layer needs 
-        # no biases.
-        self.biases = [np.random.randn(y, 1) for y in sizes[1:]]
-
-        # The weights are a y by x matrix, where y is the size of layer
-        # l, and x is the size of layer l + 1.
-        # Hence, y ranges from the input until the second to last layer
-        # and x ranges from the second to the last layer.
-        self.weights = [np.random.randn(y, x)
-                for x, y in zip(sizes[:-1], sizes[1:])]
-
-    def feed_forward(self, a):
-        # a is a vector of inputs.
-        # We compute the output for this set of inputs by computing
-        # sigmoid(weight * a + bias) for each layer, where each
-        # weight is a matrix and each bias is a vector.
-        for bias, weight in zip(self.biases, self.weights):
-            a = Activations.sigmoid(np.dot(weight, a) + bias)
-
-        return a
-
-    def stochastic_grad_desc(self, training_data, epochs, mini_batch_size,
-            learning_rate, test_data=None):
+        prev = None
+        for size in sizes:
+            layer = self.Layer(size, prev)
+            self.layers.append(layer)
+            prev = layer
+        
+        self.input_layer = self.layers[0]
+        self.output_layer = self.layers[-1]
+    
+    def get_output(self, x):
+        return self.input_layer.feedforward(x)
+    
+    def grad_desc(self, training_data, epochs, learning_rate):
         """
-        This function trains the network using stochastic gradient descent
-        on mini-batches.
-
-        SGD using mini-batches runs the feedforward and backpropogation
-        over a small number of batches, say 50, and averages to find
-        the cost. It then adjusts the weights and biases. An advantage
-        of doing this instead of training over all examples is that
-        convergence occurs faster.
+        Trains the NN by using gradient descent, modifying weights after
+        each training example.
 
         Test data is a list of tuples, mapping training inputs to
         the correct output.
-
-        After all training inputs are exhaused, an epoch is completed.
-        If test data is given, the network will be tested against the data
-        after each epoch, useful for showing progress, but otherwise slow.
         """
 
-        if test_data:
-            n_test = len(test_data)
+        m = len(training_data)
 
-        n = len(training_data)
+        epoch_list = []
+        cost_list = []
+
         for j in range(epochs):
-            random.shuffle(training_data)
-            mini_batches = [
-                    training_data[k:k + mini_batch_size]
-                    for k in range(0, n, mini_batch_size)
-            ]
+            del_b = []
+            del_w = []
 
-            for mini_batch in mini_batches:
-                self.update_mini_batch(mini_batch, learning_rate)
+            for x, y in training_data:
+                self.input_layer.feedforward(x)
+                self.output_layer.backprop(self.cost_derivative, y, del_b, del_w)
 
-            if test_data:
-                print("Epoch {0}: {1} / {2}".format(
-                    j, self.evaluate(test_data), n_test))
-            else:
-                print("Epoch {0} complete".format(j))
+                for l in range(1, self.num_layers):
+                    self.layers[l].b = self.layers[l].b - \
+                                        (learning_rate / m) * del_b[l-1]
+                    self.layers[l].w = self.layers[l].w - \
+                                        (learning_rate / m) * del_w[l-1]
+            
+            # Calculate average cost
+            epoch_list.append(j)
+            cost_list.append(self.cost(training_data))
 
-        def update_mini_batch(self, mini_batch, learning_rate):
-            """
-            Updates the weights and biases by using grad. descent
-            on the mini batch.
-            """
+        plt.plot(epoch_list, cost_list)
+        plt.show()
 
-            pass
+    def cost(self, eval_data):
+        total = 0
+        for x, y in eval_data:
+            total = total + pow((y - self.get_output(x)), 2)
+        
+        total = total / 2
+        return total[0]
+    
+    def cost_derivative(self, actual, expected):
+        return (actual - expected)
+
+
+if __name__ == '__main__':
+    network = Network([2, 4, 1])
+    xor_data = [
+        (np.array([[1], [1]]), np.array([0])),
+        (np.array([[1], [0]]), np.array([1])),
+        (np.array([[0], [1]]), np.array([1])),
+        (np.array([[0], [0]]), np.array([0]))
+    ]
+    network.grad_desc(xor_data, 10000, 0.5)
+
+    print("1 xor 1 =", network.get_output(np.array([[1], [1]])))
+    print("0 xor 1 =", network.get_output(np.array([[0], [1]])))
+    print("1 xor 0 =", network.get_output(np.array([[1], [0]])))
+    print("0 xor 0 =", network.get_output(np.array([[0], [0]])))
