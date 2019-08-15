@@ -93,10 +93,10 @@ class Network:
     def get_output(self, x):
         return self.input_layer.feedforward(x)
     
-    def grad_desc(self, training_data, epochs, learning_rate):
+    def online(self, training_data, epochs, learning_rate, plot_cost):
         """
-        Trains the NN by using gradient descent, modifying weights after
-        each training example.
+        Trains the NN by using online gradient descent, modifying weights 
+        after each training example.
 
         Test data is a list of tuples, mapping training inputs to
         the correct output.
@@ -121,12 +121,69 @@ class Network:
                     self.layers[l].w = self.layers[l].w - \
                                         (learning_rate / m) * del_w[l-1]
             
-            # Calculate average cost
-            epoch_list.append(j)
-            cost_list.append(self.cost(training_data))
+            if plot_cost:
+                # Calculate average cost
+                epoch_list.append(j)
+                cost_list.append(self.cost(training_data))
+            
+            if (j % 500) == 0:
+                print("Epoch {0}".format(j))
 
-        plt.plot(epoch_list, cost_list)
-        plt.show()
+        if plot_cost:
+            plt.plot(epoch_list, cost_list)
+            plt.show()
+
+    def stochastic_grad_desc(self, training_data, epochs, learning_rate, 
+                             mini_batch_size, eval_data=None):
+        """
+        Trains the NN by using online gradient descent, modifying weights 
+        after each mini-batch.
+
+        Test data is a list of tuples, mapping training inputs to
+        the correct output.
+        """
+
+        """
+        Trains the NN by using online gradient descent, modifying weights 
+        after each training example.
+
+        Test data is a list of tuples, mapping training inputs to
+        the correct output.
+        """
+
+        m = len(training_data)
+
+        epoch_list = []
+        cost_list = []
+
+        for j in range(epochs):
+            del_b = []
+            del_w = []
+
+            random.shuffle(training_data)
+
+            for k in range(0, m, mini_batch_size):
+                for x, y in training_data[k:k+mini_batch_size]:
+                    self.input_layer.feedforward(x)
+                    self.output_layer.backprop(self.cost_derivative, y, del_b, del_w)
+
+                for l in range(1, self.num_layers):
+                    self.layers[l].b = self.layers[l].b - \
+                                        (learning_rate / m) * del_b[l-1]
+                    self.layers[l].w = self.layers[l].w - \
+                                        (learning_rate / m) * del_w[l-1]
+            
+            if eval_data:
+                # Calculate average cost
+                epoch_list.append(j)
+                cost_list.append(self.cost(eval_data))
+
+            print("Epoch {0}".format(j))
+
+        if eval_data:
+            plt.plot(epoch_list, cost_list)
+            plt.show()
+
 
     def cost(self, eval_data):
         total = 0
@@ -138,19 +195,3 @@ class Network:
     
     def cost_derivative(self, actual, expected):
         return (actual - expected)
-
-
-if __name__ == '__main__':
-    network = Network([2, 4, 1])
-    xor_data = [
-        (np.array([[1], [1]]), np.array([0])),
-        (np.array([[1], [0]]), np.array([1])),
-        (np.array([[0], [1]]), np.array([1])),
-        (np.array([[0], [0]]), np.array([0]))
-    ]
-    network.grad_desc(xor_data, 10000, 0.5)
-
-    print("1 xor 1 =", network.get_output(np.array([[1], [1]])))
-    print("0 xor 1 =", network.get_output(np.array([[0], [1]])))
-    print("1 xor 0 =", network.get_output(np.array([[1], [0]])))
-    print("0 xor 0 =", network.get_output(np.array([[0], [0]])))
